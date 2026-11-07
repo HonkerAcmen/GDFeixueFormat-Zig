@@ -1,0 +1,61 @@
+## --- 8.5 右键菜单交互 ---
+func _on_slot_right_pressed(curr_slot_index: int, mouse_global_pos: Vector2, any_type_inventory_data: InventoryData) -> void:
+	if context_menu == null:
+		context_menu = CONTEXT_MENU.instantiate()
+		context_menu.z_index = 1
+		var item_data = any_type_inventory_data.slots[curr_slot_index].item_data
+
+		# 目前只有WeaponData继承了ItemData
+		match item_data:
+			# 后期如果要做不同类型的物体有不同的按钮文字和触发功能 可以添加is判断类型
+			_ when item_data is WeaponData and not item_data.is_equipped:
+				btn_group = [
+					SelfButton.new(
+							"装备",
+							func():
+							var target_slot_index: int = any_type_inventory_data.slots[curr_slot_index].item_data.item_type
+
+							if equipment_panel_slots_inv_data: \
+								_menu_option_unuse(target_slot_index, equipment_panel_slots_inv_data)
+							_menu_option_use(curr_slot_index, any_type_inventory_data)
+							any_type_inventory_data.transfor_slot(curr_slot_index, target_slot_index, equipment_panel_slots_inv_data)\
+						),
+					SelfButton.new("详情"),
+					SelfButton.new("丢弃"),
+				]
+			_ when item_data is WeaponData and item_data.is_equipped:
+				btn_group = [
+					SelfButton.new(
+							"卸下",
+							func():
+							_menu_option_unuse(curr_slot_index, any_type_inventory_data)
+							# slot_index是当前槽位，所以说卸下时，它为武器栏位index, 0
+							var available_slot_index = equipment_panel_inv_data.get_available_slot_index()
+							if available_slot_index == -1:
+								push_warning("背包已满")
+								return
+							any_type_inventory_data.transfor_slot(curr_slot_index, available_slot_index, equipment_panel_inv_data)\
+						),
+					SelfButton.new("详情"),
+					SelfButton.new("丢弃"),
+				]
+			_ when item_data is ItemData:
+				btn_group = [
+					SelfButton.new("使用"),
+					SelfButton.new("详情"),
+					SelfButton.new("丢弃"),
+				]
+			_:
+					return
+
+		context_menu.button_group = btn_group
+		add_child(context_menu)
+
+	context_menu.current_slot_index = curr_slot_index
+	context_menu.global_position = mouse_global_pos
+
+	if context_menu.context_menu_btu_pressed.is_connected(_on_context_menu_id_pressed):
+		context_menu.context_menu_btu_pressed.disconnect(_on_context_menu_id_pressed)
+	context_menu.context_menu_btu_pressed.connect(_on_context_menu_id_pressed)
+
+	context_menu.visible = true

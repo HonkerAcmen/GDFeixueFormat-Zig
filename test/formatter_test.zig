@@ -125,6 +125,15 @@ test "信号枚举与变量组的空行规则稳定" {
     try std.testing.expectEqualStrings(expected, actual);
 }
 
+// 用例：枚举标题注释和文档注释都与后续枚举声明保持相邻。
+test "枚举前的标题注释和文档注释不留空行" {
+    const source = "# --- 1. 枚举与常量 ---\n\nenum RightPanelBtnType {\n\tEQUIPMENT,\n\tITEM,\n\tMATERIAL\n}\n\n## 右键菜单选项（索引与 ContextMenu 的按钮对应）\n\nenum MenuOption {\n\tUSE,\n\tDROP,\n\tCANCEL\n}\n";
+    const expected = "# --- 1. 枚举与常量 ---\nenum RightPanelBtnType {\n\tEQUIPMENT,\n\tITEM,\n\tMATERIAL\n}\n\n## 右键菜单选项（索引与 ContextMenu 的按钮对应）\nenum MenuOption {\n\tUSE,\n\tDROP,\n\tCANCEL\n}\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
 // 用例：包含字典、枚举、注解、续行和函数边界的混合脚本重复格式化不再变化。
 test "混合 AST 排版结果可以重复运行" {
     const source = "@export\nvar state = {\n\"value\": [\n1,\n],\n}\nsignal changed\nenum Mode {\nIDLE,\n}\nfunc run():\n\tvar node = make(\n\t\tstate\n\t)\n\t.call(\"go\")\n\treturn node\nvar done = true\n";
@@ -148,6 +157,33 @@ test "反斜杠续行和链式调用增加两级缩进" {
 test "控制流代码块首条语句紧贴冒号" {
     const source = "func hit() -> void:\n\tif hit_tween and hit_tween.is_running():\n\n\n\t\thit_tween.kill()\n";
     const expected = "func hit() -> void:\n\tif hit_tween and hit_tween.is_running():\n\t\thit_tween.kill()\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+// 用例：多行调用中的匿名回调保留代码块续行符和结束续行符。
+test "匿名回调代码块续行符位置正确" {
+    const source = "func setup() -> void:\n\tsetup_sub_panel(\n\t\t\tequipment_panel,\n\t\t\tdata,\n\t\t\tuser,\n\t\t\tfunc (slot_ui: SlotUI):\n\t\t\tif slot_ui.slot_landed.is_connected(_on_slot_landed):\n\t\t\t\tslot_ui.slot_landed.disconnect(_on_slot_landed)\n\t\t\tslot_ui.slot_landed.connect(_on_slot_landed)\n\n\t)\n";
+    const expected = "func setup() -> void:\n\tsetup_sub_panel(\n\t\t\tequipment_panel,\n\t\t\tdata,\n\t\t\tuser,\n\t\t\tfunc (slot_ui: SlotUI):\n\t\t\tif slot_ui.slot_landed.is_connected(_on_slot_landed): \\\n\t\t\t\tslot_ui.slot_landed.disconnect(_on_slot_landed)\n\t\t\tslot_ui.slot_landed.connect(_on_slot_landed) \\\n\n\t)\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+// 用例：嵌套 if 的 return 保持在分支内部，后续装备转移语句回到回调层级。
+test "匿名回调的 return 分支不增加冒号续行符" {
+    const source = "func setup() -> void:\n\tsetup_sub_panel(\n\t\tpanel,\n\t\tfunc():\n\t\tif available_slot_index == -1:\n\t\t\tpush_warning(\"背包已满\")\n\t\t\treturn\n\t\tany_type_inventory_data.transfor_slot(curr_slot_index, available_slot_index, equipment_panel_inv_data)\n\t)\n";
+    const expected = "func setup() -> void:\n\tsetup_sub_panel(\n\t\t\tpanel,\n\t\t\tfunc():\n\t\t\tif available_slot_index == -1:\n\t\t\t\tpush_warning(\"背包已满\")\n\t\t\t\treturn\n\t\t\tany_type_inventory_data.transfor_slot(curr_slot_index, available_slot_index, equipment_panel_inv_data) \\\n\t)\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+// 用例：完整右键菜单回调的 if 分支、return 和分支后续语句保持正确缩进。
+test "完整右键菜单回调缩进结构正确" {
+    const source = @embedFile("fixtures/right_click_menu_input.txt");
+    const expected = @embedFile("fixtures/right_click_menu_expected.txt");
     const actual = try formatter.formatText(std.testing.allocator, source);
     defer std.testing.allocator.free(actual);
     try std.testing.expectEqualStrings(expected, actual);

@@ -138,6 +138,35 @@ fn makeIndentation(allocator: Allocator, base: []const u8, extra_levels: usize) 
     return try indentation.toOwnedSlice(allocator);
 }
 
+/// 检查回调代码块中的分支是否以 return、continue 或 break 结束。
+fn callbackBranchTerminates(
+    source_lines: []const []const u8,
+    header_line: usize,
+    header_indent_depth: usize,
+) bool {
+    for (header_line + 1..source_lines.len) |line_index| {
+        const line = source_lines[line_index];
+        const content = std.mem.trim(u8, line, " \t\r");
+        if (content.len == 0) continue;
+        if (ast.indentationDepth(line) <= header_indent_depth) break;
+
+        const statement = std.mem.trimStart(u8, content, " \t");
+        if (std.mem.startsWith(u8, statement, "return") or
+            std.mem.startsWith(u8, statement, "continue") or
+            std.mem.startsWith(u8, statement, "break")) return true;
+    }
+    return false;
+}
+
+/// 找到后续第一条非空行，回调和调用括号之间允许保留空行。
+fn nextNonBlankContent(source_lines: []const []const u8, start_line: usize) []const u8 {
+    for (source_lines[start_line..]) |line| {
+        const content = std.mem.trim(u8, line, " \t\r");
+        if (content.len > 0) return content;
+    }
+    return "";
+}
+
 /// 按 AST 的分隔符类型重新缩进多行容器或表达式续行。
 fn appendParsedNode(
     allocator: Allocator,
@@ -150,6 +179,12 @@ fn appendParsedNode(
     const base_indent = try normalizeIndentation(allocator, first_line);
     const normalized_base_length = base_indent.len - std.mem.trimStart(u8, base_indent, " \t").len;
     const normalized_base = base_indent[0..normalized_base_length];
+    var inside_anonymous_callback = false;
+    var callback_header_indent_depth: usize = 0;
+    var callback_header_continuation_levels: usize = 0;
+    var callback_if_active = false;
+    var callback_if_indent_depth: usize = 0;
+    var callback_if_body_seen = false;
     for (node.start_line..node.end_line) |line_index| {
         const line = source_lines[line_index];
         if (line_index == node.start_line) {
@@ -179,9 +214,70 @@ fn appendParsedNode(
         const follows_backslash = node.has_backslash_continuation and previous_content.len > 0 and previous_content[previous_content.len - 1] == '\\';
         const is_chain_call = node.has_chain_call and (std.mem.startsWith(u8, content, ".") or std.mem.startsWith(u8, content, "?."));
         if (follows_backslash or is_chain_call) continuation_levels = 2;
+        const is_callback_header = (std.mem.startsWith(u8, content, "func (") or std.mem.startsWith(u8, content, "func(")) and
+            std.mem.endsWith(u8, content, "):");
+        const source_indent_depth = ast.indentationDepth(line);
+        const previous_callback_content = if (line_index > node.start_line)
+            std.mem.trim(u8, source_lines[line_index - 1], " \t\r")
+        else
+            "";
+        const callback_statement = std.mem.trimEnd(u8, content, " \\");
+        const is_callback_if_header = inside_anonymous_callback and
+            std.mem.startsWith(u8, content, "if ") and std.mem.endsWith(u8, callback_statement, ":");
+        if (inside_anonymous_callback) {
+            var callback_extra_indent: usize = 0;
+            if (callback_if_active) {
+                const previous_branch_returns = std.mem.startsWith(u8, previous_callback_content, "return") or
+                    std.mem.startsWith(u8, previous_callback_content, "continue") or
+                    std.mem.startsWith(u8, previous_callback_content, "break");
+                const same_source_branch_level = source_indent_depth <= callback_if_indent_depth;
+                if (previous_branch_returns or (callback_if_body_seen and same_source_branch_level and
+                    !std.mem.startsWith(u8, content, "return")))
+                {
+                    callback_if_active = false;
+                }
+            }
+            if (callback_if_active) {
+                if (source_indent_depth > callback_if_indent_depth) {
+                    callback_extra_indent = source_indent_depth - callback_header_indent_depth;
+                } else {
+                    callback_extra_indent = 1;
+                }
+                callback_if_body_seen = true;
+            } else if (source_indent_depth > callback_header_indent_depth) {
+                callback_extra_indent = source_indent_depth - callback_header_indent_depth;
+            }
+            continuation_levels = callback_header_continuation_levels + callback_extra_indent;
+        }
         const indentation = try makeIndentation(allocator, normalized_base, continuation_levels);
-        const formatted_line = try std.fmt.allocPrint(allocator, "{s}{s}", .{ indentation, content });
+        const next_content = nextNonBlankContent(source_lines, line_index + 1);
+        const callback_branch_terminates = is_callback_if_header and
+            callbackBranchTerminates(source_lines, line_index, source_indent_depth);
+        const formatted_content = if (callback_branch_terminates and std.mem.endsWith(u8, content, "\\"))
+            std.mem.trimEnd(u8, content, " \\")
+        else
+            content;
+        const needs_suite_continuation = inside_anonymous_callback and
+            std.mem.endsWith(u8, callback_statement, ":") and !callback_branch_terminates;
+        const ends_callback_before_call_close = inside_anonymous_callback and
+            (std.mem.eql(u8, next_content, ")") or std.mem.eql(u8, next_content, "),"));
+        const needs_callback_continuation = needs_suite_continuation or ends_callback_before_call_close;
+        const continuation_suffix: []const u8 = if (needs_callback_continuation and !std.mem.endsWith(u8, formatted_content, "\\")) " \\" else "";
+        const formatted_line = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ indentation, formatted_content, continuation_suffix });
         try output_lines.append(allocator, formatted_line);
+        if (is_callback_header) {
+            inside_anonymous_callback = true;
+            callback_header_indent_depth = source_indent_depth;
+            callback_header_continuation_levels = continuation_levels;
+            callback_if_active = false;
+            callback_if_body_seen = false;
+        }
+        if (is_callback_if_header) {
+            callback_if_active = true;
+            callback_if_indent_depth = source_indent_depth;
+            callback_if_body_seen = false;
+        }
+        if (ends_callback_before_call_close) inside_anonymous_callback = false;
     }
 }
 
@@ -194,6 +290,7 @@ fn appendMemberGroupSpacing(
     nodes: []const ast.Node,
 ) !void {
     const previous_node = previous orelse return;
+    if (current.kind == .enumeration and previous_node.kind == .comment) return;
     var blank_lines: usize = 0;
     // 进入控制流代码块时，子节点与块头相邻；只有缩进回退离开函数作用域才补空行。
     if (previous_node.parent != current.parent and current.indent <= previous_node.indent) {
@@ -278,6 +375,16 @@ fn formatTextInner(allocator: Allocator, source_text: []const u8) ![]u8 {
             var previous_node_index = node_index;
             while (previous_node_index > 0 and document.nodes[previous_node_index - 1].kind == .blank) : (previous_node_index -= 1) {}
             if (previous_node_index > 0) previous_node_index -= 1;
+            const previous_is_comment = previous_node_index < document.nodes.len and
+                document.nodes[previous_node_index].kind == .comment;
+            const next_is_enum = next_node_index < document.nodes.len and
+                document.nodes[next_node_index].kind == .enumeration;
+            if (previous_is_comment and next_is_enum) {
+                // 标题注释和枚举文档必须紧贴枚举声明，不保留它们之间的空行。
+                line_index += 1;
+                node_index += 1;
+                continue;
+            }
             const next_is_suite_child = previous_opens_suite and next_node_index < document.nodes.len and
                 document.nodes[next_node_index].parent == previous_node_index;
             if (previous_opens_suite and next_is_suite_child) {
