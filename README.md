@@ -14,6 +14,8 @@ src/
   formatter.zig              Text formatting flow and whitespace rules
   declaration_formatter.zig  class_name / extends normalization
   function_formatter.zig     Function parameter and callback formatting
+  comment_formatter.zig     Function documentation normalization and wrapping
+  line_statistics.zig       Formatted GDScript line counting
   gdscript_syntax.zig        Parenthesis matching and parameter parsing
 test/
   all.zig                     Test suite entry point
@@ -21,10 +23,11 @@ test/
   directory_formatter_test.zig
   formatter_test.zig
   function_formatter_test.zig
+  line_statistics_test.zig
   gdscript_syntax_test.zig
 ```
 
-The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. Tests live under `test/` and are grouped by responsibility.
+The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. Function documentation handling and line statistics are separate modules. Tests live under `test/` and are grouped by responsibility.
 
 ## Requirements
 
@@ -99,7 +102,9 @@ This command starts in the GDFeixueFormat project directory, so `.` refers to th
 - Writes only files whose contents change.
 - Modifies files in place. Commit or back up your work before the first run.
 - Does not currently provide a preview or dry-run mode. Review changes with `git diff` after running it.
-- Prints the number of changed GDScript files. An unreadable target directory or file read/write failures produce a non-zero exit status.
+- Prints the number of processed and changed GDScript files, followed by line totals across successfully processed files: total lines, code lines, standalone comment lines, and blank lines.
+- Counts the formatted output, whether or not a file needed to be written. A final newline does not count as an extra line; inline comments belong to code lines.
+- An unreadable target directory or file read/write failures produce a non-zero exit status.
 
 ## Test and check formatting
 
@@ -109,7 +114,7 @@ Run all Zig tests from the project root:
 zig build test --summary all
 ```
 
-The tests cover declaration normalization, preserving a class without a base type, parameter thresholds, callbacks, nested expressions, string contents, function spacing, indentation and line endings, idempotence, and recursive file selection.
+The tests cover declaration normalization, preserving a class without a base type, parameter thresholds, callbacks, nested expressions, string contents, function documentation normalization and wrapping, function spacing, indentation and line endings, line statistics, idempotence, and recursive file selection.
 
 Check the source formatting with:
 
@@ -132,8 +137,18 @@ zig build
 - Keeps two blank lines between functions.
 - Wraps ordinary function parameters when there are four or more.
 - Always wraps `Callable` and anonymous callback parameters, regardless of count. Callback parameters are indented one additional level.
+- Treats standalone `#` or `##` comment lines directly above a function as its documentation. It normalizes every documentation line to `##`, keeps the documentation block immediately above the function, and represents blank lines inside the block as `##`.
+- Wraps function documentation at a maximum display width of 20 tab stops (80 columns, with a tab treated as four columns). The indentation and `##` prefix count toward that limit; common CJK wide characters count as two columns. Every wrapped continuation line starts with `##`.
 - Removes trailing whitespace, converts CRLF to LF, and changes space-only indentation to tabs.
 - Preserves the contents of multiline strings.
+
+### Function documentation and line-count implementation
+
+When the text formatter reaches a function declaration, it inspects the lines already collected immediately before it. If those lines contain a standalone comment block, it removes that block from its original position, normalizes and wraps it, then appends it immediately before the function header. The regular function-spacing rule runs before the documentation is appended, so the required blank separation stays before the documentation while there is no blank line between the documentation and the function. This keeps comments associated with their function when spacing is normalized.
+
+The documentation formatter removes the leading `#` or `##`, trims surrounding horizontal whitespace, and emits a consistent `##` prefix. Empty lines within the comment block become `##` lines. It walks the UTF-8 text by code point rather than byte, estimates display width (including common CJK wide characters), and starts a continuation line before the 80-column limit would be exceeded. A word boundary is preferred when the input contains spaces; long unbroken text is split at a character boundary.
+
+After each `.gd` file is successfully formatted, the directory formatter counts the formatted text and adds it to the directory totals. A line is classified as blank when it contains only whitespace, as a comment when its first non-whitespace character is `#`, and as code otherwise. Thus inline comments count with their code line. The CLI prints the totals after the file-processing summary. Counting the formatted result means reported line counts match the files as they will exist after the formatter completes.
 
 Example input:
 
