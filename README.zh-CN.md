@@ -1,0 +1,249 @@
+# GDFeixueFormat
+
+[English](README.md) | **简体中文**
+
+GDFeixueFormat 是使用 Zig 编写的 GDScript 命令行格式化工具。它会递归扫描目标目录，格式化扩展名为 `.gd` 的普通文件，并将变化写回原文件。它不依赖 Godot 编辑器或运行时。
+
+## 项目结构
+
+```text
+build.zig
+src/
+  main.zig                   命令行参数与程序入口
+  directory_formatter.zig    目录遍历和文件读写
+  formatter.zig              文本格式化流程与空白规则
+  declaration_formatter.zig  class_name / extends 规范化
+  function_formatter.zig     函数参数与回调格式化
+  gdscript_syntax.zig        括号匹配和参数解析
+test/
+  all.zig                     全量测试入口
+  declaration_formatter_test.zig
+  directory_formatter_test.zig
+  formatter_test.zig
+  function_formatter_test.zig
+  gdscript_syntax_test.zig
+```
+
+文本格式化核心不负责文件读写，目录模块不解析 GDScript 语法，命令行入口也不包含格式规则。测试集中放在 `test/`，按模块职责组织。
+
+## 环境要求
+
+- Zig **0.17.1**。本项目尚未验证其他版本。
+- 支持运行 Zig 的终端环境。本项目目前已在 macOS 上构建和测试；Linux、Windows 原生构建尚未验证。
+- 对需要格式化的 Godot 项目文件具有读写权限。
+
+检查 Zig 版本：
+
+```sh
+zig version
+```
+
+预期输出为 `0.17.1`。如果终端找不到 `zig`，请安装 Zig、将其加入 `PATH`，然后重新打开终端。
+
+## 从源码编译
+
+在 GDFeixueFormat 项目根目录运行：
+
+```sh
+zig build
+```
+
+编译成功后，程序位于：
+
+```text
+zig-out/bin/GDFeixueFormat
+```
+
+Windows 下程序名带 `.exe` 后缀。
+
+需要优化构建时可以运行：
+
+```sh
+zig build -Doptimize=ReleaseFast
+```
+
+开发和调试通常使用默认构建即可。`zig-out/` 与 `.zig-cache/` 是生成目录，不应提交到版本控制。
+
+## 运行格式化器
+
+### 直接运行编译结果
+
+```sh
+./zig-out/bin/GDFeixueFormat /path/to/godot/project
+```
+
+参数是要格式化的目录，可以使用绝对路径，也可以使用相对于当前工作目录的路径。例如，终端已位于 Godot 项目根目录时：
+
+```sh
+/path/to/GDFeixueFormat/zig-out/bin/GDFeixueFormat .
+```
+
+### 通过 Zig 构建步骤运行
+
+```sh
+zig build run -- /path/to/godot/project
+```
+
+`--` 后的参数会传给格式化器。要格式化相对于当前工作目录的目录，可以运行：
+
+```sh
+zig build run -- .
+```
+
+该命令从 GDFeixueFormat 项目目录启动，因此 `.` 指的是格式化器项目本身。格式化其他项目时，请传入 Godot 项目路径。
+
+### 运行行为
+
+- 递归处理目标目录内的 `.gd` 普通文件。
+- 跳过其他扩展名的文件。
+- 只写回内容发生变化的文件。
+- 会直接修改文件。首次运行前请提交或备份当前工作。
+- 当前没有预览或 dry-run 模式。运行后请使用 `git diff` 检查变化。
+- 成功时输出变化的 GDScript 文件数。目标目录无法打开或文件读写失败时，程序会以非零状态退出。
+
+## 运行测试与格式检查
+
+在项目根目录运行全部 Zig 测试：
+
+```sh
+zig build test --summary all
+```
+
+测试覆盖声明规范化、无父类声明保留、参数数量阈值、回调、嵌套表达式、字符串内容、函数间距、缩进与换行、幂等性和递归文件筛选。
+
+检查 Zig 源码格式：
+
+```sh
+zig fmt --check build.zig src test
+```
+
+提交源码前建议依次运行：
+
+```sh
+zig fmt --check build.zig src test
+zig build test --summary all
+zig build
+```
+
+## 格式规则
+
+- 相邻的 `class_name Example` 和 `extends Node` 合并为 `class_name Example extends Node`，输入顺序不限。
+- 只有 `class_name` 而没有 `extends` 时，保留单独的 `class_name`，不会自动补充父类。
+- 函数之间保留两个空行。
+- 普通函数有四个或更多参数时逐个换行。
+- `Callable` 和匿名回调参数无论数量多少都会换行；匿名回调内部参数再缩进一层。
+- 清理行尾空格，将 CRLF 转换为 LF，并将纯空格缩进转换为 Tab。
+- 多行字符串的内容保持原样。
+
+输入示例：
+
+```gdscript
+extends Node2D
+class_name Example
+
+func attack(a: int, b: int, c: int, d: int) -> void:
+	pass
+```
+
+格式化结果：
+
+```gdscript
+class_name Example extends Node2D
+
+
+func attack(
+	a: int,
+	b: int,
+	c: int,
+	d: int
+) -> void:
+	pass
+```
+
+## 接入 Godot 项目
+
+### 方式一：从独立目录调用
+
+适合先试用或本机使用，无需修改 Godot 项目文件。
+
+1. 在 GDFeixueFormat 源码目录编译一次：
+
+   ```sh
+   cd /path/to/GDFeixueFormat
+   zig build
+   ```
+
+2. 将 Godot 项目目录作为参数传入：
+
+   ```sh
+   /path/to/GDFeixueFormat/zig-out/bin/GDFeixueFormat /path/to/godot/project
+   ```
+
+3. 在 Godot 项目仓库检查变更：
+
+   ```sh
+   cd /path/to/godot/project
+   git diff -- '*.gd'
+   ```
+
+每台开发机都需要安装兼容版本的 Zig 并本地编译，或者获取与本机操作系统和处理器架构匹配的程序。
+
+### 方式二：将源码纳入 Godot 项目仓库
+
+团队共享时，可以将格式化器源码作为 Git 子模块加入，或直接纳入仓库的专用目录，例如 `tools/GDFeixueFormat/`：
+
+```sh
+git submodule add <GDFeixueFormat-repository-url> tools/GDFeixueFormat
+git submodule update --init --recursive
+```
+
+请将 `<GDFeixueFormat-repository-url>` 替换为实际使用的仓库地址。
+
+然后从 Godot 项目根目录编译和运行：
+
+```sh
+cd tools/GDFeixueFormat
+zig build test --summary all
+zig build
+cd ../..
+tools/GDFeixueFormat/zig-out/bin/GDFeixueFormat .
+```
+
+如果源码放在其他目录，请相应调整可执行文件路径。不要在项目配置中写入开发者机器上的绝对路径。
+
+### 接入项目脚本或 CI
+
+源码纳入仓库后，可将下列步骤加入项目的任务运行器、编辑器工具、提交前检查或 CI：
+
+1. 在运行环境安装受支持的 Zig 版本。
+2. 在 GDFeixueFormat 目录运行 `zig build test --summary all`。
+3. 在该目录运行 `zig build`。
+4. 使用 Godot 项目根目录作为参数运行编译出的程序。
+5. 决定流程是保留格式化结果，还是发现格式差异后拒绝通过。
+
+若 CI 要检查格式而不保留修改，可以运行格式化器后检查跟踪的 GDScript 文件是否变化：
+
+```sh
+tools/GDFeixueFormat/zig-out/bin/GDFeixueFormat .
+git diff --exit-code -- '*.gd'
+```
+
+`git diff` 返回非零表示格式化器修改了文件。当前工具直接写回文件，没有只检查模式。
+
+## 常见问题
+
+### `zig: command not found`
+
+终端无法通过 `PATH` 找到 Zig。请安装 Zig 0.17.1、将它加入 `PATH`，并使用 `zig version` 确认。
+
+### 找不到 `zig-out/bin/GDFeixueFormat`
+
+编译尚未成功完成。请在 GDFeixueFormat 项目根目录运行 `zig build` 后再启动程序。
+
+### 格式化器报告文件错误
+
+确认目标目录存在，并且当前用户可以读写其中的 `.gd` 文件。单个文件失败不会阻止工具继续处理其他脚本；处理结束后，程序会以非零状态退出。
+
+### 一次修改了很多文件
+
+格式化器会直接改写不符合规则的 `.gd` 文件。请使用 `git diff -- '*.gd'` 检查结果。若发现意外变化，请恢复对应文件，并添加回归测试后再调整格式化规则。
