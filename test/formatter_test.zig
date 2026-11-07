@@ -143,3 +143,12 @@ test "反斜杠续行和链式调用增加两级缩进" {
     defer std.testing.allocator.free(actual);
     try std.testing.expectEqualStrings(expected, actual);
 }
+
+// 用例：控制流冒号开启代码块，不能将块头和首条语句分隔为空行。
+test "控制流代码块首条语句紧贴冒号" {
+    const source = "func hit() -> void:\n\tif hit_tween and hit_tween.is_running():\n\n\n\t\thit_tween.kill()\n";
+    const expected = "func hit() -> void:\n\tif hit_tween and hit_tween.is_running():\n\t\thit_tween.kill()\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}

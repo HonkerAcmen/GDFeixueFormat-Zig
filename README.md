@@ -27,9 +27,10 @@ test/
   line_statistics_test.zig
   gdscript_ast_test.zig
   gdscript_syntax_test.zig
+  TEST_CASES.md              Complete inventory of named test cases
 ```
 
-The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. `gdscript_ast.zig` tokenizes source and builds statement and nested-container nodes; the formatter uses those node kinds for indentation and spacing. Function documentation handling and line statistics remain separate modules. Tests live under `test/` and are grouped by responsibility.
+The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. `gdscript_ast.zig` tokenizes source and builds statement and nested-container nodes; the formatter uses those node kinds for indentation and spacing. Function documentation handling and line statistics remain separate modules. Tests live under `test/` and are grouped by responsibility. [`test/TEST_CASES.md`](test/TEST_CASES.md) lists every named case and its purpose (45 behavior cases plus the aggregate test entry point).
 
 ## Requirements
 
@@ -116,7 +117,7 @@ Run all Zig tests from the project root:
 zig build test --summary all
 ```
 
-The tests cover declaration normalization, preserving a class without a base type, Godot 4 keywords, statement and container AST construction, dictionary versus enum braces, parameter thresholds, callbacks, nested expressions, string contents, annotations, backslash continuations, chained calls, function documentation normalization and wrapping, declaration spacing, line statistics, idempotence, and recursive file selection.
+The suite currently has 46 passing tests: 45 named behavior cases and the aggregate module-registration test. Coverage includes tokenization, statement and container AST construction, nested parent relationships, invalid delimiters, annotation and continuation handling, chained calls, declaration and function formatting, documentation wrapping, declaration spacing, line statistics, idempotence, and recursive file selection. See the [complete test case inventory](test/TEST_CASES.md) for every case.
 
 Check the source formatting with:
 
@@ -156,7 +157,7 @@ When the text formatter reaches a function declaration, it inspects the lines al
 
 The documentation formatter removes the leading `#` or `##`, trims surrounding horizontal whitespace, and emits a consistent `##` prefix. Empty lines within the comment block become `##` lines. It walks the UTF-8 text by code point rather than byte, estimates display width (including common CJK wide characters), and starts a continuation line before the 80-column limit would be exceeded. A word boundary is preferred when the input contains spaces; long unbroken text is split at a character boundary.
 
-The GDScript parser first tokenizes identifiers, keywords, annotations, strings, comments, operators, delimiters, and explicit continuation markers. Strings and comments are single lexical units, so bracket characters inside them do not affect parsing. It then forms statement nodes with source line ranges, indentation parents, suite boundaries, and continuation metadata. A second pass matches nested delimiters and creates typed container nodes for parentheses, arrays, dictionaries, and enum bodies. A `{` therefore gets its meaning from the surrounding declaration and expression context instead of being treated as a generic scope marker.
+The GDScript parser first tokenizes identifiers, keywords, annotations, strings, comments, operators, delimiters, and explicit continuation markers. Strings and comments are single lexical units, so bracket characters inside them do not affect parsing. It then forms statement nodes with source line ranges, indentation parents, suite boundaries, and continuation metadata. A second pass matches nested delimiters and creates typed container nodes for parentheses, arrays, dictionaries, and enum bodies. Container nodes retain parent relationships. A `{` therefore gets its meaning from the surrounding declaration and expression context instead of being treated as a generic scope marker. This is a lightweight formatter-oriented AST, not a complete Godot language semantic AST; it records the structure needed by the current formatting rules.
 
 The formatter walks these statement nodes in source order. For a multiline container it counts the active parent containers on each line: arrays, dictionaries, and enum bodies add one tab level, while parenthesized expression continuations add two. Closing lines return to the enclosing node's indentation. Explicit `\\` continuations and leading-dot call chains also stay with their owning expression and use the two-level continuation style. These choices follow the [Godot GDScript style guide](https://docs.godotengine.org/en/latest/tutorials/scripting/gdscript/gdscript_styleguide.html) for container and expression continuations. The parser also tracks which declaration owns an annotation block so empty lines can be removed from the middle of the relationship without moving the annotation away from its declaration.
 

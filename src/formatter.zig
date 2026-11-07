@@ -195,7 +195,8 @@ fn appendMemberGroupSpacing(
 ) !void {
     const previous_node = previous orelse return;
     var blank_lines: usize = 0;
-    if (previous_node.parent != current.parent) {
+    // 进入控制流代码块时，子节点与块头相邻；只有缩进回退离开函数作用域才补空行。
+    if (previous_node.parent != current.parent and current.indent <= previous_node.indent) {
         if (previous_node.parent) |parent_index| {
             const parent_kind = nodes[parent_index].kind;
             if (parent_kind == .function or parent_kind == .class_declaration) blank_lines = 2;
@@ -269,6 +270,21 @@ fn formatTextInner(allocator: Allocator, source_text: []const u8) ![]u8 {
             line_index += 1;
             node_index += 1;
             continue;
+        }
+        if (node.kind == .blank) {
+            const previous_opens_suite = if (previous_node) |previous| previous.opens_suite else false;
+            var next_node_index = node_index + 1;
+            while (next_node_index < document.nodes.len and document.nodes[next_node_index].kind == .blank) : (next_node_index += 1) {}
+            var previous_node_index = node_index;
+            while (previous_node_index > 0 and document.nodes[previous_node_index - 1].kind == .blank) : (previous_node_index -= 1) {}
+            if (previous_node_index > 0) previous_node_index -= 1;
+            const next_is_suite_child = previous_opens_suite and next_node_index < document.nodes.len and
+                document.nodes[next_node_index].parent == previous_node_index;
+            if (previous_opens_suite and next_is_suite_child) {
+                line_index += 1;
+                node_index += 1;
+                continue;
+            }
         }
         if (multiline_quote != 0) {
             // 多行字符串中的内容可能长得像代码，必须原样复制并跳过格式规则。
