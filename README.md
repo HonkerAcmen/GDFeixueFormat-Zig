@@ -20,6 +20,7 @@ src/
   gdscript_syntax.zig        Parenthesis matching and parameter parsing
 test/
   all.zig                     Test suite entry point
+  fixtures/                   Input and expected-output files for integration cases
   declaration_formatter_test.zig
   directory_formatter_test.zig
   formatter_test.zig
@@ -30,7 +31,7 @@ test/
   TEST_CASES.md              Complete inventory of named test cases
 ```
 
-The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. `gdscript_ast.zig` tokenizes source and builds statement and nested-container nodes; the formatter uses those node kinds for indentation and spacing. Function documentation handling and line statistics remain separate modules. Tests live under `test/` and are grouped by responsibility. [`test/TEST_CASES.md`](test/TEST_CASES.md) lists every named case and its purpose (45 behavior cases plus the aggregate test entry point).
+The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. `gdscript_ast.zig` tokenizes source and builds statement and nested-container nodes; the formatter uses those node kinds for indentation and spacing. Function documentation handling and line statistics remain separate modules. Tests live under `test/` and are grouped by responsibility. `test/fixtures/` contains larger callback input and expected-output samples. [`test/TEST_CASES.md`](test/TEST_CASES.md) lists every named case and its purpose (50 behavior cases plus the aggregate test entry point).
 
 ## Requirements
 
@@ -117,7 +118,7 @@ Run all Zig tests from the project root:
 zig build test --summary all
 ```
 
-The suite currently has 46 passing tests: 45 named behavior cases and the aggregate module-registration test. Coverage includes tokenization, statement and container AST construction, nested parent relationships, invalid delimiters, annotation and continuation handling, chained calls, declaration and function formatting, documentation wrapping, declaration spacing, line statistics, idempotence, and recursive file selection. See the [complete test case inventory](test/TEST_CASES.md) for every case.
+The suite currently has 51 passing tests: 50 named behavior cases and the aggregate module-registration test. Coverage includes tokenization, statement and container AST construction, nested parent relationships, invalid delimiters, annotation and continuation handling, chained calls, callback branch and closing-parenthesis continuations, declaration and function formatting, documentation wrapping, declaration spacing, line statistics, idempotence, and recursive file selection. See the [complete test case inventory](test/TEST_CASES.md) for every case.
 
 Check the source formatting with:
 
@@ -138,6 +139,7 @@ zig build
 - Adjacent `class_name Example` and `extends Node` declarations become `class_name Example extends Node`, regardless of their input order.
 - A `class_name` without an `extends` declaration remains on its own; the formatter does not invent a base type.
 - Keeps two blank lines between functions.
+- Keeps a section or documentation comment directly above an enum attached to that declaration, without inserting a blank line between them.
 - Wraps ordinary function parameters when there are four or more.
 - Always wraps `Callable` and anonymous callback parameters, regardless of count. Callback parameters are indented one additional level.
 - Treats standalone `#` or `##` comment lines directly above a function as its documentation. It normalizes every documentation line to `##`, keeps the documentation block immediately above the function, and represents blank lines inside the block as `##`.
@@ -145,8 +147,9 @@ zig build
 - Builds statement nodes for functions, variables, constants, signals, enums, annotations, control-flow statements, and expressions. It recognizes Godot 4 keywords such as `class_name` and `trait` as keywords, not user identifiers.
 - Distinguishes indentation-based suites introduced by `:` from dictionary literals and enum bodies. Nested arrays and dictionaries are represented as typed container nodes, so a dictionary brace never pushes a code-block indentation scope.
 - Keeps annotation blocks attached to their declaration, including when blank lines occur between separate annotation lines. It keeps backslash-continued expressions together and indents their continuation lines by two levels.
+- Tracks anonymous callback bodies inside multiline calls. It places a trailing `\\` where a callback suite or its final statement must continue the argument, skips blank lines when finding the call's closing `)` or `),`, and removes a redundant continuation marker from an `if` header whose branch ends with `return`, `continue`, or `break`.
 - Groups leading-dot method calls with the preceding expression and formats the chain continuation at two indentation levels.
-- Uses two blank lines around function boundaries. It uses one blank line to separate signal/enum declaration groups, while annotations remain attached to the declarations they modify.
+- Uses two blank lines around function boundaries. It uses one blank line to separate signal/enum declaration groups, keeps comments attached to enum declarations, and keeps annotations attached to the declarations they modify.
 - If the tokenizer finds mismatched or unclosed parentheses, brackets, or braces, the formatter leaves that file's text unchanged instead of applying a partial rewrite.
 - Removes trailing whitespace, converts CRLF to LF, and changes space-only indentation to tabs.
 - Preserves the contents of multiline strings.
@@ -159,7 +162,7 @@ The documentation formatter removes the leading `#` or `##`, trims surrounding h
 
 The GDScript parser first tokenizes identifiers, keywords, annotations, strings, comments, operators, delimiters, and explicit continuation markers. Strings and comments are single lexical units, so bracket characters inside them do not affect parsing. It then forms statement nodes with source line ranges, indentation parents, suite boundaries, and continuation metadata. A second pass matches nested delimiters and creates typed container nodes for parentheses, arrays, dictionaries, and enum bodies. Container nodes retain parent relationships. A `{` therefore gets its meaning from the surrounding declaration and expression context instead of being treated as a generic scope marker. This is a lightweight formatter-oriented AST, not a complete Godot language semantic AST; it records the structure needed by the current formatting rules.
 
-The formatter walks these statement nodes in source order. For a multiline container it counts the active parent containers on each line: arrays, dictionaries, and enum bodies add one tab level, while parenthesized expression continuations add two. Closing lines return to the enclosing node's indentation. Explicit `\\` continuations and leading-dot call chains also stay with their owning expression and use the two-level continuation style. These choices follow the [Godot GDScript style guide](https://docs.godotengine.org/en/latest/tutorials/scripting/gdscript/gdscript_styleguide.html) for container and expression continuations. The parser also tracks which declaration owns an annotation block so empty lines can be removed from the middle of the relationship without moving the annotation away from its declaration.
+The formatter walks these statement nodes in source order. For a multiline container it counts the active parent containers on each line: arrays, dictionaries, and enum bodies add one tab level, while parenthesized expression continuations add two. Closing lines return to the enclosing node's indentation. Explicit `\\` continuations and leading-dot call chains also stay with their owning expression and use the two-level continuation style. Inside a multiline anonymous callback, the formatter tracks the callback body and nested `if` branch so it can distinguish a branch that returns from one that continues normally. It adds or removes continuation markers accordingly and looks past blank lines to recognize the enclosing call's closing delimiter. Enum group spacing also accounts for a leading comment, keeping that comment directly attached to its enum. These choices follow the [Godot GDScript style guide](https://docs.godotengine.org/en/latest/tutorials/scripting/gdscript/gdscript_styleguide.html) for container and expression continuations. The parser also tracks which declaration owns an annotation block so empty lines can be removed from the middle of the relationship without moving the annotation away from its declaration.
 
 After each `.gd` file is successfully formatted, the directory formatter counts the formatted text and adds it to the directory totals. A line is classified as blank when it contains only whitespace, as a comment when its first non-whitespace character is `#`, and as code otherwise. Thus inline comments count with their code line. The CLI prints the totals after the file-processing summary. Counting the formatted result means reported line counts match the files as they will exist after the formatter completes.
 

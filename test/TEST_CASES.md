@@ -6,7 +6,7 @@ Run the full suite from the project root:
 zig build test --summary all
 ```
 
-The suite contains 45 named behavior cases and one aggregate import test (`test/all.zig`). The aggregate test ensures every test module is registered with Zig's test runner.
+The suite contains 50 named behavior cases and one aggregate import test (`test/all.zig`). The aggregate test ensures every test module is registered with Zig's test runner.
 
 ## `declaration_formatter_test.zig`
 
@@ -46,7 +46,12 @@ The suite contains 45 named behavior cases and one aggregate import test (`test/
 14. **同一行注解与变量之间不插入空行** — Avoids inserting a blank line between inline annotation and variable.
 15. **多行调用结束后的链式调用保持归属与缩进** — Keeps a chain attached to its preceding multiline call and indents it consistently.
 16. **信号枚举与变量组的空行规则稳定** — Applies stable spacing between signals, enums, and variable groups.
-17. **混合 AST 排版结果可以重复运行** — Checks idempotence across combined AST formatting rules.
+17. **枚举前的标题注释和文档注释不留空行** — Keeps heading and documentation comments adjacent to enum declarations.
+18. **混合 AST 排版结果可以重复运行** — Checks idempotence across combined AST formatting rules.
+19. **控制流代码块首条语句紧贴冒号** — Keeps the first statement attached to its control-flow header.
+20. **匿名回调代码块续行符位置正确** — Places continuation markers on callback suite headers and before a call close, including when blank lines intervene.
+21. **匿名回调的 return 分支不增加冒号续行符** — Removes a redundant continuation marker from a callback `if` branch that returns.
+22. **完整右键菜单回调缩进结构正确** — Preserves nested callback, branch, and return indentation in a full fixture.
 
 ## `gdscript_ast_test.zig`
 
