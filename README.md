@@ -16,6 +16,7 @@ src/
   function_formatter.zig     Function parameter and callback formatting
   comment_formatter.zig     Function documentation normalization and wrapping
   line_statistics.zig       Formatted GDScript line counting
+  gdscript_ast.zig          Tokenizer and statement/container AST
   gdscript_syntax.zig        Parenthesis matching and parameter parsing
 test/
   all.zig                     Test suite entry point
@@ -24,10 +25,11 @@ test/
   formatter_test.zig
   function_formatter_test.zig
   line_statistics_test.zig
+  gdscript_ast_test.zig
   gdscript_syntax_test.zig
 ```
 
-The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. Function documentation handling and line statistics are separate modules. Tests live under `test/` and are grouped by responsibility.
+The text formatter does not perform file I/O, the directory module does not parse GDScript syntax, and the CLI does not contain formatting rules. `gdscript_ast.zig` tokenizes source and builds statement and nested-container nodes; the formatter uses those node kinds for indentation and spacing. Function documentation handling and line statistics remain separate modules. Tests live under `test/` and are grouped by responsibility.
 
 ## Requirements
 
@@ -114,7 +116,7 @@ Run all Zig tests from the project root:
 zig build test --summary all
 ```
 
-The tests cover declaration normalization, preserving a class without a base type, parameter thresholds, callbacks, nested expressions, string contents, function documentation normalization and wrapping, function spacing, indentation and line endings, line statistics, idempotence, and recursive file selection.
+The tests cover declaration normalization, preserving a class without a base type, Godot 4 keywords, statement and container AST construction, dictionary versus enum braces, parameter thresholds, callbacks, nested expressions, string contents, annotations, backslash continuations, chained calls, function documentation normalization and wrapping, declaration spacing, line statistics, idempotence, and recursive file selection.
 
 Check the source formatting with:
 
@@ -139,6 +141,12 @@ zig build
 - Always wraps `Callable` and anonymous callback parameters, regardless of count. Callback parameters are indented one additional level.
 - Treats standalone `#` or `##` comment lines directly above a function as its documentation. It normalizes every documentation line to `##`, keeps the documentation block immediately above the function, and represents blank lines inside the block as `##`.
 - Wraps function documentation at a maximum display width of 20 tab stops (80 columns, with a tab treated as four columns). The indentation and `##` prefix count toward that limit; common CJK wide characters count as two columns. Every wrapped continuation line starts with `##`.
+- Builds statement nodes for functions, variables, constants, signals, enums, annotations, control-flow statements, and expressions. It recognizes Godot 4 keywords such as `class_name` and `trait` as keywords, not user identifiers.
+- Distinguishes indentation-based suites introduced by `:` from dictionary literals and enum bodies. Nested arrays and dictionaries are represented as typed container nodes, so a dictionary brace never pushes a code-block indentation scope.
+- Keeps annotation blocks attached to their declaration, including when blank lines occur between separate annotation lines. It keeps backslash-continued expressions together and indents their continuation lines by two levels.
+- Groups leading-dot method calls with the preceding expression and formats the chain continuation at two indentation levels.
+- Uses two blank lines around function boundaries. It uses one blank line to separate signal/enum declaration groups, while annotations remain attached to the declarations they modify.
+- If the tokenizer finds mismatched or unclosed parentheses, brackets, or braces, the formatter leaves that file's text unchanged instead of applying a partial rewrite.
 - Removes trailing whitespace, converts CRLF to LF, and changes space-only indentation to tabs.
 - Preserves the contents of multiline strings.
 
@@ -147,6 +155,10 @@ zig build
 When the text formatter reaches a function declaration, it inspects the lines already collected immediately before it. If those lines contain a standalone comment block, it removes that block from its original position, normalizes and wraps it, then appends it immediately before the function header. The regular function-spacing rule runs before the documentation is appended, so the required blank separation stays before the documentation while there is no blank line between the documentation and the function. This keeps comments associated with their function when spacing is normalized.
 
 The documentation formatter removes the leading `#` or `##`, trims surrounding horizontal whitespace, and emits a consistent `##` prefix. Empty lines within the comment block become `##` lines. It walks the UTF-8 text by code point rather than byte, estimates display width (including common CJK wide characters), and starts a continuation line before the 80-column limit would be exceeded. A word boundary is preferred when the input contains spaces; long unbroken text is split at a character boundary.
+
+The GDScript parser first tokenizes identifiers, keywords, annotations, strings, comments, operators, delimiters, and explicit continuation markers. Strings and comments are single lexical units, so bracket characters inside them do not affect parsing. It then forms statement nodes with source line ranges, indentation parents, suite boundaries, and continuation metadata. A second pass matches nested delimiters and creates typed container nodes for parentheses, arrays, dictionaries, and enum bodies. A `{` therefore gets its meaning from the surrounding declaration and expression context instead of being treated as a generic scope marker.
+
+The formatter walks these statement nodes in source order. For a multiline container it counts the active parent containers on each line: arrays, dictionaries, and enum bodies add one tab level, while parenthesized expression continuations add two. Closing lines return to the enclosing node's indentation. Explicit `\\` continuations and leading-dot call chains also stay with their owning expression and use the two-level continuation style. These choices follow the [Godot GDScript style guide](https://docs.godotengine.org/en/latest/tutorials/scripting/gdscript/gdscript_styleguide.html) for container and expression continuations. The parser also tracks which declaration owns an annotation block so empty lines can be removed from the middle of the relationship without moving the annotation away from its declaration.
 
 After each `.gd` file is successfully formatted, the directory formatter counts the formatted text and adds it to the directory totals. A line is classified as blank when it contains only whitespace, as a comment when its first non-whitespace character is `#`, and as code otherwise. Thus inline comments count with their code line. The CLI prints the totals after the file-processing summary. Counting the formatted result means reported line counts match the files as they will exist after the formatter completes.
 

@@ -11,6 +11,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const ast = b.createModule(.{
+        .root_source_file = b.path("src/gdscript_ast.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const declarations = b.createModule(.{
         .root_source_file = b.path("src/declaration_formatter.zig"),
         .target = target,
@@ -41,6 +46,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "declaration_formatter", .module = declarations },
             .{ .name = "function_formatter", .module = functions },
             .{ .name = "comment_formatter", .module = comments },
+            .{ .name = "gdscript_ast", .module = ast },
         },
     });
     const directory_formatter = b.createModule(.{
@@ -75,6 +81,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "directory_formatter", .module = directory_formatter },
             .{ .name = "gdscript_syntax", .module = syntax },
             .{ .name = "line_statistics", .module = line_statistics },
+            .{ .name = "gdscript_ast", .module = ast },
         },
     });
     const test_binary = b.addTest(.{ .root_module = test_module });

@@ -4,6 +4,7 @@ const syntax = @import("gdscript_syntax");
 const declarations = @import("declaration_formatter");
 const functions = @import("function_formatter");
 const comments = @import("comment_formatter");
+const ast = @import("gdscript_ast");
 
 // 本模块负责文本处理顺序；语法判断和文件读写分别交给专属模块。
 /// 将文本片段追加到输出缓冲区。
@@ -88,9 +89,10 @@ fn formatFunctionAt(
     source_lines: []const []const u8,
     output_lines: *std.ArrayList([]const u8),
     line_index: *usize,
+    has_annotation: bool,
 ) !void {
     const documentation = try takeFunctionDocumentation(allocator, source_lines[line_index.*], output_lines);
-    try appendFunctionSpacing(allocator, output_lines);
+    if (!has_annotation) try appendFunctionSpacing(allocator, output_lines);
     if (documentation) |documentation_lines| {
         try output_lines.appendSlice(allocator, documentation_lines);
     }
@@ -128,10 +130,119 @@ fn appendCodeLine(allocator: Allocator, output_lines: *std.ArrayList([]const u8)
     }
 }
 
+/// 生成指定缩进层级的 Tab 前缀，统一用于容器与表达式续行。
+fn makeIndentation(allocator: Allocator, base: []const u8, extra_levels: usize) ![]u8 {
+    var indentation: std.ArrayList(u8) = .empty;
+    try indentation.appendSlice(allocator, base);
+    for (0..extra_levels) |_| try indentation.append(allocator, '\t');
+    return try indentation.toOwnedSlice(allocator);
+}
+
+/// 按 AST 的分隔符类型重新缩进多行容器或表达式续行。
+fn appendParsedNode(
+    allocator: Allocator,
+    output_lines: *std.ArrayList([]const u8),
+    source_lines: []const []const u8,
+    node: ast.Node,
+    containers: []const ast.ContainerNode,
+) !void {
+    const first_line = source_lines[node.start_line];
+    const base_indent = try normalizeIndentation(allocator, first_line);
+    const normalized_base_length = base_indent.len - std.mem.trimStart(u8, base_indent, " \t").len;
+    const normalized_base = base_indent[0..normalized_base_length];
+    for (node.start_line..node.end_line) |line_index| {
+        const line = source_lines[line_index];
+        if (line_index == node.start_line) {
+            try output_lines.append(allocator, base_indent);
+            continue;
+        }
+        const content = std.mem.trim(u8, line, " \t\r");
+        if (content.len == 0) {
+            try output_lines.append(allocator, "");
+            continue;
+        }
+        var continuation_levels: usize = 2;
+        if (node.delimiter != null) {
+            continuation_levels = 0;
+            for (containers) |container| {
+                if (container.start_line >= line_index or container.end_line <= line_index) continue;
+                continuation_levels += switch (container.kind) {
+                    .parentheses => 2,
+                    .array_literal, .dictionary_literal, .enum_body => 1,
+                };
+            }
+        } else if (node.kind == .annotation or node.kind == .comment) {
+            continuation_levels = 0;
+        }
+        const previous_line = source_lines[line_index - 1];
+        const previous_content = std.mem.trimEnd(u8, previous_line, " \t\r");
+        const follows_backslash = node.has_backslash_continuation and previous_content.len > 0 and previous_content[previous_content.len - 1] == '\\';
+        const is_chain_call = node.has_chain_call and (std.mem.startsWith(u8, content, ".") or std.mem.startsWith(u8, content, "?."));
+        if (follows_backslash or is_chain_call) continuation_levels = 2;
+        const indentation = try makeIndentation(allocator, normalized_base, continuation_levels);
+        const formatted_line = try std.fmt.allocPrint(allocator, "{s}{s}", .{ indentation, content });
+        try output_lines.append(allocator, formatted_line);
+    }
+}
+
+/// 在同级成员声明组之间保留一个空行；注解与被注解声明始终相邻。
+fn appendMemberGroupSpacing(
+    allocator: Allocator,
+    output_lines: *std.ArrayList([]const u8),
+    previous: ?ast.Node,
+    current: ast.Node,
+    nodes: []const ast.Node,
+) !void {
+    const previous_node = previous orelse return;
+    var blank_lines: usize = 0;
+    if (previous_node.parent != current.parent) {
+        if (previous_node.parent) |parent_index| {
+            const parent_kind = nodes[parent_index].kind;
+            if (parent_kind == .function or parent_kind == .class_declaration) blank_lines = 2;
+        }
+    } else if (previous_node.indent == current.indent and
+        (previous_node.kind == .function or previous_node.kind == .class_declaration or
+            current.kind == .function or current.kind == .class_declaration))
+    {
+        blank_lines = 2;
+    }
+    const current_is_group = current.kind == .enumeration or current.kind == .signal;
+    const previous_is_group = previous_node.kind == .enumeration or previous_node.kind == .signal;
+    if (blank_lines == 0 and previous_node.parent == current.parent and previous_node.indent == current.indent and
+        (current_is_group or previous_is_group)) blank_lines = 1;
+    if (blank_lines == 0) return;
+    while (output_lines.items.len > 0 and ast.classifyLine(output_lines.items[output_lines.items.len - 1]) == .blank) {
+        _ = output_lines.pop();
+    }
+    for (0..blank_lines) |_| try output_lines.append(allocator, "");
+}
+
+/// 检查 AST 前一节点是否为独立注解，后续声明需要紧贴该注解块。
+fn previousNodeIsAnnotation(previous: ?ast.Node) bool {
+    return if (previous) |node| node.kind == .annotation else false;
+}
+
+/// 跳过连续注解、空行和说明注释，判断注解块是否修饰函数。
+fn annotationBlockTargetsFunction(nodes: []const ast.Node, start_index: usize) bool {
+    var index = start_index + 1;
+    while (index < nodes.len and
+        (nodes[index].kind == .annotation or nodes[index].kind == .blank or nodes[index].kind == .comment)) : (index += 1)
+    {}
+    return index < nodes.len and nodes[index].kind == .function;
+}
+
 /// 按行完成空白整理、函数签名规范化和文件头声明合并。
 fn formatTextInner(allocator: Allocator, source_text: []const u8) ![]u8 {
     const normalized = try std.mem.replaceOwned(u8, allocator, source_text, "\r\n", "\n");
     defer allocator.free(normalized);
+    const document = try ast.parse(allocator, normalized);
+    defer allocator.free(document.tokens);
+    defer allocator.free(document.nodes);
+    defer allocator.free(document.containers);
+    if (!document.syntax_valid) {
+        // 无法建立合法语法树时不执行部分格式化，防止错误输入被重排。
+        return try allocator.dupe(u8, normalized);
+    }
 
     var source_lines: std.ArrayList([]const u8) = .empty;
     defer source_lines.deinit(allocator);
@@ -142,37 +253,78 @@ fn formatTextInner(allocator: Allocator, source_text: []const u8) ![]u8 {
     defer output_lines.deinit(allocator);
     var multiline_quote: u8 = 0;
     var line_index: usize = 0;
+    var node_index: usize = 0;
+    var previous_node: ?ast.Node = null;
+    var pending_annotation = false;
     while (line_index < source_lines.items.len) {
+        while (node_index < document.nodes.len and document.nodes[node_index].end_line <= line_index) node_index += 1;
+        if (node_index >= document.nodes.len) break;
+        const node = document.nodes[node_index];
+        if (node.start_line != line_index) {
+            line_index += 1;
+            continue;
+        }
         var line = source_lines.items[line_index];
+        if (pending_annotation and node.kind == .blank) {
+            line_index += 1;
+            node_index += 1;
+            continue;
+        }
         if (multiline_quote != 0) {
             // 多行字符串中的内容可能长得像代码，必须原样复制并跳过格式规则。
             try output_lines.append(allocator, line);
             const marker: [3]u8 = .{ multiline_quote, multiline_quote, multiline_quote };
             if (std.mem.indexOf(u8, line, &marker) != null) multiline_quote = 0;
             line_index += 1;
+            previous_node = node;
+            node_index += 1;
             continue;
         }
         if (std.mem.indexOf(u8, line, "\"\"\"") != null) {
             try output_lines.append(allocator, std.mem.trimEnd(u8, line, " \t"));
             if (std.mem.count(u8, line, "\"\"\"") == 1) multiline_quote = '"';
             line_index += 1;
+            previous_node = node;
+            node_index += 1;
             continue;
         }
         if (std.mem.indexOf(u8, line, "'''") != null) {
             try output_lines.append(allocator, std.mem.trimEnd(u8, line, " \t"));
             if (std.mem.count(u8, line, "'''") == 1) multiline_quote = '\'';
             line_index += 1;
+            previous_node = node;
+            node_index += 1;
             continue;
         }
 
         line = std.mem.trimEnd(u8, line, " \t\r");
-        if (syntax.isFunction(line)) {
-            try formatFunctionAt(allocator, source_lines.items, &output_lines, &line_index);
+        if (node.kind == .function) {
+            const has_annotation = pending_annotation or previousNodeIsAnnotation(previous_node);
+            if (!has_annotation) try appendMemberGroupSpacing(allocator, &output_lines, previous_node, node, document.nodes);
+            try formatFunctionAt(allocator, source_lines.items, &output_lines, &line_index, has_annotation);
+            previous_node = node;
+            node_index += 1;
+            pending_annotation = false;
             continue;
         }
-
-        try appendCodeLine(allocator, &output_lines, line);
-        line_index += 1;
+        if (node.kind == .annotation) {
+            if (!pending_annotation and annotationBlockTargetsFunction(document.nodes, node_index)) {
+                try appendFunctionSpacing(allocator, &output_lines);
+            }
+            pending_annotation = true;
+        } else if (node.kind != .comment and node.kind != .blank) {
+            pending_annotation = false;
+            try appendMemberGroupSpacing(allocator, &output_lines, previous_node, node, document.nodes);
+        }
+        if (node.end_line - node.start_line > 1) {
+            try appendParsedNode(allocator, &output_lines, source_lines.items, node, document.containers);
+            line_index = node.end_line;
+        } else {
+            try appendCodeLine(allocator, &output_lines, line);
+            line_index += 1;
+        }
+        previous_node = node;
+        node_index += 1;
     }
 
     try declarations.formatDeclarations(allocator, &output_lines);

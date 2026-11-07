@@ -6,4 +6,5 @@ test {
     _ = @import("directory_formatter_test.zig");
     _ = @import("gdscript_syntax_test.zig");
     _ = @import("line_statistics_test.zig");
+    _ = @import("gdscript_ast_test.zig");
 }
