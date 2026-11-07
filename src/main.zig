@@ -26,7 +26,11 @@ pub fn main(init: std.process.Init) !void {
     const root = try openTargetDirectory(init.io, path);
     defer root.close(init.io);
     const result = try directory_formatter.formatDirectory(init.io, init.gpa, root);
-    std.debug.print("已格式化 {d} 个 GDScript 文件。", .{result.changed_files});
+    std.debug.print("已处理 {d} 个 GDScript 文件，格式化修改 {d} 个。\n", .{ result.processed_files, result.changed_files });
+    std.debug.print(
+        "代码行数：总计 {d} 行（代码 {d} 行，注释 {d} 行，空行 {d} 行）。\n",
+        .{ result.lines.total_lines, result.lines.code_lines, result.lines.comment_lines, result.lines.blank_lines },
+    );
     if (result.failed_files > 0) {
         std.debug.print("\n{d} 个文件处理失败。\n", .{result.failed_files});
         return error.FormatFailed;

@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const syntax = @import("gdscript_syntax");
 const declarations = @import("declaration_formatter");
 const functions = @import("function_formatter");
+const comments = @import("comment_formatter");
 
 // 本模块负责文本处理顺序；语法判断和文件读写分别交给专属模块。
 /// 将文本片段追加到输出缓冲区。
@@ -19,6 +20,50 @@ fn appendFunctionSpacing(allocator: Allocator, lines: *std.ArrayList([]const u8)
         try lines.append(allocator, "");
         try lines.append(allocator, "");
     }
+}
+
+/// 判断去除行首缩进后，文本是否为空。
+fn isBlankLine(line: []const u8) bool {
+    return std.mem.trim(u8, line, " \t").len == 0;
+}
+
+/// 判断一行是否为独立的 GDScript 注释，而不是代码行尾注释。
+fn isCommentLine(line: []const u8) bool {
+    return std.mem.startsWith(u8, std.mem.trimStart(u8, line, " \t"), "#");
+}
+
+/// 找到紧邻函数的注释块，忽略块与函数之间原有的空行。
+fn findFunctionDocumentation(lines: []const []const u8) ?struct { start: usize, end: usize } {
+    var end = lines.len;
+    while (end > 0 and isBlankLine(lines[end - 1])) end -= 1;
+    if (end == 0 or !isCommentLine(lines[end - 1])) return null;
+
+    var start = end;
+    while (start > 0) {
+        const previous_line = lines[start - 1];
+        if (isCommentLine(previous_line) or isBlankLine(previous_line)) {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    while (start < end and isBlankLine(lines[start])) start += 1;
+    return .{ .start = start, .end = end };
+}
+
+/// 将函数文档从缓冲区取出并格式化，避免函数间距规则把文档与函数分开。
+fn takeFunctionDocumentation(
+    allocator: Allocator,
+    source_line: []const u8,
+    output_lines: *std.ArrayList([]const u8),
+) !?[][]const u8 {
+    const block = findFunctionDocumentation(output_lines.items) orelse return null;
+    const indentation_length = source_line.len - std.mem.trimStart(u8, source_line, " \t").len;
+    const indentation = source_line[0..indentation_length];
+    const formatted = try comments.formatDocumentation(allocator, output_lines.items[block.start..block.end], indentation);
+
+    while (output_lines.items.len > block.start) _ = output_lines.pop();
+    return formatted;
 }
 
 /// 将以空格缩进的代码行转换为 Tab 缩进，多行字符串由调用方绕过此函数。
@@ -44,7 +89,11 @@ fn formatFunctionAt(
     output_lines: *std.ArrayList([]const u8),
     line_index: *usize,
 ) !void {
+    const documentation = try takeFunctionDocumentation(allocator, source_lines[line_index.*], output_lines);
     try appendFunctionSpacing(allocator, output_lines);
+    if (documentation) |documentation_lines| {
+        try output_lines.appendSlice(allocator, documentation_lines);
+    }
 
     var header: std.ArrayList(u8) = .empty;
     defer header.deinit(allocator);

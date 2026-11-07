@@ -1,11 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const formatter = @import("formatter");
+const line_statistics = @import("line_statistics");
 
 /// 汇总目录处理结果，供命令行显示成功数并决定退出状态。
 pub const Result = struct {
+    processed_files: usize = 0,
     changed_files: usize = 0,
     failed_files: usize = 0,
+    lines: line_statistics.Statistics = .{},
 };
 
 /// 递归格式化目录中扩展名为 `.gd` 的普通文件。
@@ -33,6 +36,8 @@ pub fn formatDirectory(io: std.Io, allocator: Allocator, root: std.Io.Dir) !Resu
             };
             result.changed_files += 1;
         }
+        result.processed_files += 1;
+        result.lines.add(line_statistics.count(formatted));
     }
     return result;
 }

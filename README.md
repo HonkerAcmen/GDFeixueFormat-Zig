@@ -142,7 +142,7 @@ extends Node2D
 class_name Example
 
 func attack(a: int, b: int, c: int, d: int) -> void:
-	pass
+ pass
 ```
 
 Formatted output:
@@ -152,12 +152,12 @@ class_name Example extends Node2D
 
 
 func attack(
-	a: int,
-	b: int,
-	c: int,
-	d: int
+ a: int,
+ b: int,
+ c: int,
+ d: int
 ) -> void:
-	pass
+ pass
 ```
 
 ## Integrate with a Godot project

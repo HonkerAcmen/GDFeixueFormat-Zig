@@ -16,6 +16,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const comments = b.createModule(.{
+        .root_source_file = b.path("src/comment_formatter.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const line_statistics = b.createModule(.{
+        .root_source_file = b.path("src/line_statistics.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const functions = b.createModule(.{
         .root_source_file = b.path("src/function_formatter.zig"),
         .target = target,
@@ -30,13 +40,17 @@ pub fn build(b: *std.Build) void {
             .{ .name = "gdscript_syntax", .module = syntax },
             .{ .name = "declaration_formatter", .module = declarations },
             .{ .name = "function_formatter", .module = functions },
+            .{ .name = "comment_formatter", .module = comments },
         },
     });
     const directory_formatter = b.createModule(.{
         .root_source_file = b.path("src/directory_formatter.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "formatter", .module = formatter }},
+        .imports = &.{
+            .{ .name = "formatter", .module = formatter },
+            .{ .name = "line_statistics", .module = line_statistics },
+        },
     });
 
     // CLI 只负责输入路径和结果提示，格式化文件委托给目录模块。
@@ -60,6 +74,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "formatter", .module = formatter },
             .{ .name = "directory_formatter", .module = directory_formatter },
             .{ .name = "gdscript_syntax", .module = syntax },
+            .{ .name = "line_statistics", .module = line_statistics },
         },
     });
     const test_binary = b.addTest(.{ .root_module = test_module });
