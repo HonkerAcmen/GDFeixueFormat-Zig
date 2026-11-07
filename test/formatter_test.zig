@@ -90,6 +90,51 @@ test "括号内嵌套容器按 AST 父子层级缩进" {
     try std.testing.expectEqualStrings(expected, actual);
 }
 
+// 用例：注解参数跨行时按照表达式续行缩进，注解与变量之间不插入空行。
+test "多行注解参数与变量声明保持相邻" {
+    const source = "@export_range(\n0,\n10\n)\nvar speed: float\n";
+    const expected = "@export_range(\n\t\t0,\n\t\t10\n)\nvar speed: float\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+// 用例：同一行多个注解仍识别被修饰变量，不误判为独立注解块。
+test "同一行注解与变量之间不插入空行" {
+    const source = "@export @onready var target: Node\nvar count = 0\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(source, actual);
+}
+
+// 用例：多行函数调用结束后，链式调用仍使用两级续行缩进。
+test "多行调用结束后的链式调用保持归属与缩进" {
+    const source = "var node = get_node(\n\"Target\"\n)\n.call(\"activate\")\n";
+    const expected = "var node = get_node(\n\t\t\"Target\"\n)\n\t\t.call(\"activate\")\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+// 用例：信号和枚举声明组前后均规范为一个空行，变量组继续保持紧凑。
+test "信号枚举与变量组的空行规则稳定" {
+    const source = "var first = 1\nsignal changed\nsignal reset\nenum State {\nIDLE,\n}\nvar last = 2\n";
+    const expected = "var first = 1\n\nsignal changed\n\nsignal reset\n\nenum State {\n\tIDLE,\n}\n\nvar last = 2\n";
+    const actual = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+// 用例：包含字典、枚举、注解、续行和函数边界的混合脚本重复格式化不再变化。
+test "混合 AST 排版结果可以重复运行" {
+    const source = "@export\nvar state = {\n\"value\": [\n1,\n],\n}\nsignal changed\nenum Mode {\nIDLE,\n}\nfunc run():\n\tvar node = make(\n\t\tstate\n\t)\n\t.call(\"go\")\n\treturn node\nvar done = true\n";
+    const once = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(once);
+    const twice = try formatter.formatText(std.testing.allocator, once);
+    defer std.testing.allocator.free(twice);
+    try std.testing.expectEqualStrings(once, twice);
+}
+
 // 用例：显式反斜杠续行与点开头的链式调用按表达式续行缩进。
 test "反斜杠续行和链式调用增加两级缩进" {
     const source = "var result = get_first() + \\\n+get_second()\nvar node = get_node(\"A\")\n.call(\"B\")\n";
