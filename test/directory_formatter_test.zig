@@ -30,3 +30,35 @@ test "递归格式化 GDScript 并跳过其他扩展名" {
     defer std.testing.allocator.free(unchanged);
     try std.testing.expectEqualStrings("keep\n", unchanged);
 }
+
+// 忽略目录时不进入，路径比较必须按组件匹配，不能误伤名称前缀相同的目录。
+test "忽略多个文件和目录且保留同名前缀路径" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    for ([_][]const u8{ "skip", "skip_more", "keep" }) |name| {
+        try temporary.dir.createDir(std.testing.io, name, .default_dir);
+    }
+    const source = "var value = 1  \n";
+    const paths = [_][]const u8{ "skip/a.gd", "skip_more/a.gd", "keep/a.gd", "keep/b.gd", "root.gd" };
+    for (paths) |path| try temporary.dir.writeFile(std.testing.io, .{ .sub_path = path, .data = source });
+    const absolute = try temporary.dir.realPathFileAlloc(std.testing.io, "root.gd", std.testing.allocator);
+    defer std.testing.allocator.free(absolute);
+    const result = try formatter.formatDirectoryIgnoring(std.testing.io, std.testing.allocator, temporary.dir, &.{ "./skip/", "keep/../keep/a.gd", absolute, "missing.gd" });
+    try std.testing.expectEqual(@as(usize, 2), result.processed_files);
+    try std.testing.expectEqual(@as(usize, 2), result.changed_files);
+    try std.testing.expectEqual(@as(usize, 0), result.failed_files);
+    try std.testing.expectEqual(@as(usize, 2), result.lines.total_lines);
+    for (paths, 0..) |path, index| {
+        const actual = try temporary.dir.readFileAlloc(std.testing.io, path, std.testing.allocator, .unlimited);
+        defer std.testing.allocator.free(actual);
+        try std.testing.expectEqualStrings(if (index == 1 or index == 3) "var value = 1\n" else source, actual);
+    }
+}
+
+test "忽略目标目录本身时不处理文件" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "a.gd", .data = "var a = 1  \n" });
+    const result = try formatter.formatDirectoryIgnoring(std.testing.io, std.testing.allocator, temporary.dir, &.{"."});
+    try std.testing.expectEqual(@as(usize, 0), result.processed_files);
+}

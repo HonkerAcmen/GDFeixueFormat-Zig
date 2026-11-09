@@ -99,6 +99,15 @@ zig build run -- .
 
 该命令从 GDFeixueFormat 项目目录启动，因此 `.` 指的是格式化器项目本身。格式化其他项目时，请传入 Godot 项目路径。
 
+### 忽略文件和文件夹
+
+```sh
+./zig-out/bin/GDFeixueFormat /path/to/godot/project -g addons scripts/generated.gd "folder with spaces"
+zig build run -- /path/to/godot/project -g addons scripts/generated.gd
+```
+
+`-g` 后可跟多个路径。相对路径以目标目录为基准，也支持绝对路径；忽略文件夹会跳过其全部子目录。路径按完整组件匹配，不支持通配符，不存在的路径不影响运行。被忽略的文件不会修改，也不计入文件数和行数统计。带空格的路径需要加引号；`-g` 后必须至少提供一个路径。
+
 ### 运行行为
 
 - 递归处理目标目录内的 `.gd` 普通文件。

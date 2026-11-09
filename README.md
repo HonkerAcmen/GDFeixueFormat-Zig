@@ -99,6 +99,15 @@ zig build run -- .
 
 This command starts in the GDFeixueFormat project directory, so `.` refers to the formatter project itself. Pass the Godot project path when formatting another project.
 
+### Ignore files and directories
+
+```sh
+./zig-out/bin/GDFeixueFormat /path/to/godot/project -g addons scripts/generated.gd "folder with spaces"
+zig build run -- /path/to/godot/project -g addons scripts/generated.gd
+```
+
+Pass one or more paths after `-g`. Relative paths are resolved against the target directory; absolute paths are also supported. Ignoring a directory skips its entire subtree. Matching uses complete path components, without glob patterns; missing paths are harmless. Ignored files are neither modified nor included in file or line counts. Quote paths containing spaces. `-g` requires at least one path.
+
 ### Runtime behavior
 
 - Recursively processes regular `.gd` files under the target directory.
