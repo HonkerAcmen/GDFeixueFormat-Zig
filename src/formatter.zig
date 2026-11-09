@@ -182,9 +182,6 @@ fn appendParsedNode(
     var inside_anonymous_callback = false;
     var callback_header_indent_depth: usize = 0;
     var callback_header_continuation_levels: usize = 0;
-    var callback_if_active = false;
-    var callback_if_indent_depth: usize = 0;
-    var callback_if_body_seen = false;
     for (node.start_line..node.end_line) |line_index| {
         const line = source_lines[line_index];
         if (line_index == node.start_line) {
@@ -217,36 +214,12 @@ fn appendParsedNode(
         const is_callback_header = (std.mem.startsWith(u8, content, "func (") or std.mem.startsWith(u8, content, "func(")) and
             std.mem.endsWith(u8, content, "):");
         const source_indent_depth = ast.indentationDepth(line);
-        const previous_callback_content = if (line_index > node.start_line)
-            std.mem.trim(u8, source_lines[line_index - 1], " \t\r")
-        else
-            "";
         const callback_statement = std.mem.trimEnd(u8, content, " \\");
         const is_callback_if_header = inside_anonymous_callback and
             std.mem.startsWith(u8, content, "if ") and std.mem.endsWith(u8, callback_statement, ":");
         if (inside_anonymous_callback) {
-            var callback_extra_indent: usize = 0;
-            if (callback_if_active) {
-                const previous_branch_returns = std.mem.startsWith(u8, previous_callback_content, "return") or
-                    std.mem.startsWith(u8, previous_callback_content, "continue") or
-                    std.mem.startsWith(u8, previous_callback_content, "break");
-                const same_source_branch_level = source_indent_depth <= callback_if_indent_depth;
-                if (previous_branch_returns or (callback_if_body_seen and same_source_branch_level and
-                    !std.mem.startsWith(u8, content, "return")))
-                {
-                    callback_if_active = false;
-                }
-            }
-            if (callback_if_active) {
-                if (source_indent_depth > callback_if_indent_depth) {
-                    callback_extra_indent = source_indent_depth - callback_header_indent_depth;
-                } else {
-                    callback_extra_indent = 1;
-                }
-                callback_if_body_seen = true;
-            } else if (source_indent_depth > callback_header_indent_depth) {
-                callback_extra_indent = source_indent_depth - callback_header_indent_depth;
-            }
+            // 代码块的相对缩进决定语义，不能根据 return 等语句猜测分支边界。
+            const callback_extra_indent = source_indent_depth -| callback_header_indent_depth;
             continuation_levels = callback_header_continuation_levels + callback_extra_indent;
         }
         const indentation = try makeIndentation(allocator, normalized_base, continuation_levels);
@@ -269,13 +242,6 @@ fn appendParsedNode(
             inside_anonymous_callback = true;
             callback_header_indent_depth = source_indent_depth;
             callback_header_continuation_levels = continuation_levels;
-            callback_if_active = false;
-            callback_if_body_seen = false;
-        }
-        if (is_callback_if_header) {
-            callback_if_active = true;
-            callback_if_indent_depth = source_indent_depth;
-            callback_if_body_seen = false;
         }
         if (ends_callback_before_call_close) inside_anonymous_callback = false;
     }

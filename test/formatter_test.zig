@@ -187,4 +187,37 @@ test "完整右键菜单回调缩进结构正确" {
     const actual = try formatter.formatText(std.testing.allocator, source);
     defer std.testing.allocator.free(actual);
     try std.testing.expectEqualStrings(expected, actual);
+    const twice = try formatter.formatText(std.testing.allocator, actual);
+    defer std.testing.allocator.free(twice);
+    try std.testing.expectEqualStrings(actual, twice);
+}
+
+// 回调参数的位置可以变化，但函数体及嵌套分支的相对缩进必须保持。
+test "重复格式化保留匿名函数和提前返回分支的相对缩进" {
+    const source =
+        "func setup():\n" ++
+        "\tSelfButton.new(\n" ++
+        "\t\t\"卸下\",\n" ++
+        "\t\tfunc():\n" ++
+        "\t\t\t_menu_option_unuse()\n" ++
+        "\t\t\t# 保留回调内注释\n" ++
+        "\t\t\tvar available_slot_index = get_slot()\n" ++
+        "\t\t\tif available_slot_index == -1:\n" ++
+        "\t\t\t\tpush_warning(\"背包已满\")\n" ++
+        "\t\t\t\treturn\n" ++
+        "\t\t\ttransfor_slot()\\\n" ++
+        "\t)\n";
+    const once = try formatter.formatText(std.testing.allocator, source);
+    defer std.testing.allocator.free(once);
+    try std.testing.expect(std.mem.indexOf(u8, once, "\t\t\tfunc():\n\t\t\t\t_menu_option_unuse()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, once, "\t\t\t\tif available_slot_index == -1:\n\t\t\t\t\tpush_warning(\"背包已满\")\n\t\t\t\t\treturn\n\t\t\t\ttransfor_slot()") != null);
+    var current = try std.testing.allocator.dupe(u8, once);
+    defer std.testing.allocator.free(current);
+    for (0..4) |_| {
+        const next = try formatter.formatText(std.testing.allocator, current);
+        errdefer std.testing.allocator.free(next);
+        try std.testing.expectEqualStrings(once, next);
+        std.testing.allocator.free(current);
+        current = next;
+    }
 }

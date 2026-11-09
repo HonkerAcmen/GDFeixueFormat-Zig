@@ -13,12 +13,12 @@ func _on_slot_right_pressed(curr_slot_index: int, mouse_global_pos: Vector2, any
 					SelfButton.new(
 							"装备",
 							func():
-							var target_slot_index: int = any_type_inventory_data.slots[curr_slot_index].item_data.item_type
+								var target_slot_index: int = any_type_inventory_data.slots[curr_slot_index].item_data.item_type
 
-							if equipment_panel_slots_inv_data: \
-							_menu_option_unuse(target_slot_index, equipment_panel_slots_inv_data)
-							_menu_option_use(curr_slot_index, any_type_inventory_data)
-							any_type_inventory_data.transfor_slot(curr_slot_index, target_slot_index, equipment_panel_slots_inv_data)\
+								if equipment_panel_slots_inv_data: \
+									_menu_option_unuse(target_slot_index, equipment_panel_slots_inv_data)
+								_menu_option_use(curr_slot_index, any_type_inventory_data)
+								any_type_inventory_data.transfor_slot(curr_slot_index, target_slot_index, equipment_panel_slots_inv_data)\
 						),
 					SelfButton.new("详情"),
 					SelfButton.new("丢弃"),
@@ -28,13 +28,13 @@ func _on_slot_right_pressed(curr_slot_index: int, mouse_global_pos: Vector2, any
 					SelfButton.new(
 							"卸下",
 							func():
-							_menu_option_unuse(curr_slot_index, any_type_inventory_data)
-							# slot_index是当前槽位，所以说卸下时，它为武器栏位index, 0
-							var available_slot_index = equipment_panel_inv_data.get_available_slot_index()
-							if available_slot_index == -1: \
-								push_warning("背包已满")
-								return
-							any_type_inventory_data.transfor_slot(curr_slot_index, available_slot_index, equipment_panel_inv_data)\
+								_menu_option_unuse(curr_slot_index, any_type_inventory_data)
+								# slot_index是当前槽位，所以说卸下时，它为武器栏位index, 0
+								var available_slot_index = equipment_panel_inv_data.get_available_slot_index()
+								if available_slot_index == -1: \
+									push_warning("背包已满")
+									return
+								any_type_inventory_data.transfor_slot(curr_slot_index, available_slot_index, equipment_panel_inv_data)\
 						),
 					SelfButton.new("详情"),
 					SelfButton.new("丢弃"),
